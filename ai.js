@@ -12,14 +12,17 @@ http.createServer((req, res) => {
     console.log(`🌍 HTTP Server running on port ${PORT}`);
 });
 
-const GEMINI_KEY = "AQ.Ab8RN6LYJUEEgVU-i5svxaZixMW1tvrPqUxxxZREdfVD6RdpgQ";
+// Render Environment Variable mathi key leshe (GitHub leak thi bachva mate)
+let GEMINI_KEY = process.env.GEMINI_KEY || "";
+let isGeminiKeyValid = Boolean(GEMINI_KEY);
+
 const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR5LeChHO-tpBOHSxObs86uTvDUqoiIwWJ0181ir7UYvEhv03uU1minFQxkzRZ0rN0K_VqjnKRXM_R9/pub?output=csv";
 
 let catalogText = "Loading catalog...";
 const chatMemory = {};
 const processedMsgIds = new Set();
 
-async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
+async function fetchWithTimeout(url, options = {}, timeoutMs = 25000) {
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -34,7 +37,7 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
 
 async function loadCatalog() {
     try {
-        const res = await fetchWithTimeout(CSV_URL, {}, 10000);
+        const res = await fetchWithTimeout(CSV_URL, {}, 15000);
         const text = await res.text();
         const lines = text.split("\n").filter(l => l.trim() !== "");
         let items = [];
@@ -84,75 +87,100 @@ NIYAMO:
 
     const fullPrompt = `${systemRules}\n\nChat History:\n${chatMemory[senderId].join("\n")}\nSalesman:`;
 
-    // Multiple Gemini Models list with automatic fallback
-    const geminiModels = [
-        "gemini-flash-latest",
-        "gemini-flash-lite-latest",
-        "gemini-2.5-flash",
-        "gemini-1.5-flash"
-    ];
+    // 1. Try Gemini Models (Only if valid key is present in Render Environment)
+    if (isGeminiKeyValid && GEMINI_KEY) {
+        const geminiModels = [
+            "gemini-2.5-flash",
+            "gemini-flash-latest",
+            "gemini-1.5-flash"
+        ];
 
-    for (const model of geminiModels) {
-        try {
-            console.log(`🔄 Trying model: ${model}`);
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-            const res = await fetchWithTimeout(url, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "X-goog-api-key": GEMINI_KEY
-                },
-                body: JSON.stringify({
-                    contents: [{ parts: [{ text: fullPrompt }] }]
-                })
-            }, 8000);
+        for (const model of geminiModels) {
+            try {
+                console.log(`🔄 Trying Gemini model: ${model}`);
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`;
+                const res = await fetchWithTimeout(url, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        contents: [{ parts: [{ text: fullPrompt }] }]
+                    })
+                }, 15000);
 
-            const data = await res.json();
-            if (data.error) {
-                console.log(`⚠️ Model ${model} error:`, data.error.message);
-                continue;
+                const data = await res.json();
+                if (data.error) {
+                    console.log(`⚠️ Model ${model} error:`, data.error.message);
+                    if (data.error.message.includes("API key not valid")) {
+                        console.log("⚠️ Disabling invalid Gemini Key, switching permanently to Free AI Models...");
+                        isGeminiKeyValid = false;
+                        break;
+                    }
+                    continue;
+                }
+
+                const reply = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+                if (reply) {
+                    console.log(`✅ Gemini Replied successfully using ${model}!`);
+                    chatMemory[senderId].push(`Salesman: ${reply}`);
+                    return reply;
+                }
+            } catch (err) {
+                console.log(`⚠️ Model ${model} failed:`, err.message);
             }
-
-            const reply = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-            if (reply) {
-                console.log(`✅ AI Replied successfully using ${model}!`);
-                chatMemory[senderId].push(`Salesman: ${reply}`);
-                return reply;
-            }
-        } catch (err) {
-            console.log(`⚠️ Model ${model} failed:`, err.message);
         }
     }
 
-    // Backup Free AI (Pollinations OpenAI)
+    // 2. Multi-Model Free AI (No API Key Required - OpenAI & Mistral with 25s timeout)
+    const freeModels = ["openai", "mistral"];
+    for (const freeModel of freeModels) {
+        try {
+            console.log(`🔄 Trying Free AI Model (${freeModel})...`);
+            const res = await fetchWithTimeout("https://text.pollinations.ai/openai", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    model: freeModel,
+                    messages: [
+                        { role: "system", content: systemRules },
+                        { role: "user", content: `Chat History:\n${chatMemory[senderId].join("\n")}\n\nCustomer na chhella message no natural human salesman tarike jawab aap:` }
+                    ]
+                })
+            }, 25000);
+
+            if (res.ok) {
+                const data = await res.json();
+                let reply = data.choices?.[0]?.message?.content?.trim();
+                if (reply) {
+                    reply = reply.replace(/^Salesman:\s*/i, "");
+                    console.log(`✅ Free AI (${freeModel}) Replied successfully!`);
+                    chatMemory[senderId].push(`Salesman: ${reply}`);
+                    return reply;
+                }
+            }
+        } catch (e) {
+            console.log(`⚠️ Free AI (${freeModel}) failed:`, e.message);
+        }
+    }
+
+    // 3. Direct Fast GET Fallback
     try {
-        console.log(`🔄 Trying backup AI...`);
-        const res = await fetchWithTimeout("https://text.pollinations.ai/openai", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                model: "openai",
-                messages: [
-                    { role: "system", content: systemRules },
-                    { role: "user", content: `Chat History:\n${chatMemory[senderId].join("\n")}\n\nCustomer na chhella message no natural human salesman tarike jawab aap:` }
-                ]
-            })
-        }, 8000);
+        console.log(`🔄 Trying Fast Direct AI Fallback...`);
+        const directUrl = `https://text.pollinations.ai/${encodeURIComponent(fullPrompt)}`;
+        const res = await fetchWithTimeout(directUrl, { method: "GET" }, 25000);
         if (res.ok) {
-            const data = await res.json();
-            let reply = data.choices?.[0]?.message?.content?.trim();
+            let reply = (await res.text()).trim();
             if (reply) {
                 reply = reply.replace(/^Salesman:\s*/i, "");
-                console.log(`✅ Backup AI Replied successfully!`);
+                console.log(`✅ Fast Direct AI Replied successfully!`);
                 chatMemory[senderId].push(`Salesman: ${reply}`);
                 return reply;
             }
         }
     } catch (e) {
-        console.log(`⚠️ Backup AI failed:`, e.message);
+        console.log(`⚠️ Direct AI failed:`, e.message);
     }
 
-    return "Arey bhai, aatyare thodu network slow chhe, tame thodi var ma fari message karo!";
+    return "Namaste Bhai! MANN'S STORE ma tamaru swagat che. Amaro live catalog jovu hoy to https://mannclothes.netlify.app par visit karo athva tamare kaya kapda jova che te janavo!";
 }
 
 let sock = null;
