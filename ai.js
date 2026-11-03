@@ -92,6 +92,7 @@ NIYAMO:
 
     for (const model of geminiModels) {
         try {
+            console.log(`🔄 Trying model: ${model}`);
             const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
             const res = await fetchWithTimeout(url, {
                 method: "POST",
@@ -105,17 +106,24 @@ NIYAMO:
             }, 8000);
 
             const data = await res.json();
-            if (data.error) continue;
+            if (data.error) {
+                console.log(`⚠️ Model ${model} error:`, data.error.message);
+                continue;
+            }
 
             const reply = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
             if (reply) {
+                console.log(`✅ AI Replied successfully!`);
                 chatMemory[senderId].push(`Salesman: ${reply}`);
                 return reply;
             }
-        } catch (err) {}
+        } catch (err) {
+            console.log(`⚠️ Model ${model} failed:`, err.message);
+        }
     }
 
     try {
+        console.log(`🔄 Trying backup AI...`);
         const res = await fetchWithTimeout("https://text.pollinations.ai/openai", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -132,13 +140,16 @@ NIYAMO:
             let reply = data.choices?.[0]?.message?.content?.trim();
             if (reply) {
                 reply = reply.replace(/^Salesman:\s*/i, "");
+                console.log(`✅ Backup AI Replied successfully!`);
                 chatMemory[senderId].push(`Salesman: ${reply}`);
                 return reply;
             }
         }
-    } catch (e) {}
+    } catch (e) {
+        console.log(`⚠️ Backup AI failed:`, e.message);
+    }
 
-    return null;
+    return "Ane mara bhai, aatyare thodu technical issue che, tamare su jovu che store ma te kaho!";
 }
 
 let sock = null;
@@ -195,12 +206,17 @@ async function startAIBot() {
                 const text = m?.conversation || m?.extendedTextMessage?.text || m?.imageMessage?.caption || "";
                 if (!text.trim()) continue;
 
+                console.log(`\n📩 Incoming Msg from ${jid}: ${text}`);
                 await sock.sendPresenceUpdate("composing", jid).catch(() => {});
+                
                 const reply = await askAI(jid, text);
                 if (reply) {
                     await sock.sendMessage(jid, { text: reply });
+                    console.log(`📤 Reply Sent Successfully!`);
                 }
-            } catch (err) {}
+            } catch (err) {
+                console.log("⚠️ Msg Error:", err.message);
+            }
         }
     });
 }
