@@ -1,7 +1,8 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, makeInMemoryStore } = require("@whiskeysockets/baileys");
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, delay } = require("@whiskeysockets/baileys");
 const pino = require("pino");
 const http = require("http");
-const readline = require("readline");
+
+const phoneNumber = "918401690936"; 
 
 const PORT = process.env.PORT || 10000;
 http.createServer((req, res) => {
@@ -155,6 +156,16 @@ async function startAIBot() {
         connectTimeoutMs: 60000,
         syncFullHistory: false
     });
+
+    if (!sock.authState.creds.registered) {
+        await delay(4000);
+        let num = phoneNumber.replace(/[^0-9]/g, "");
+        let code = await sock.requestPairingCode(num);
+        code = code?.match(/.{1,4}/g)?.join("-") || code;
+        console.log(`\n========================================`);
+        console.log(`📌 TMARO WHATSAPP PAIRING CODE: ${code}`);
+        console.log(`========================================\n`);
+    }
 
     sock.ev.on("creds.update", saveCreds);
 
