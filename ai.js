@@ -1,5 +1,15 @@
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require("@whiskeysockets/baileys");
 const pino = require("pino");
+const http = require("http");
+
+// Render mate chhotu HTTP server jethi port open rahe
+const PORT = process.env.PORT || 10000;
+http.createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("MANN'S STORE WhatsApp AI Bot is Running 24/7!\n");
+}).listen(PORT, () => {
+    console.log(`🌍 HTTP Server running on port ${PORT}`);
+});
 
 const GEMINI_KEY = "AQ.Ab8RN6IROf8L6GnhW7XlE94Ld-EbgYYgRKwidHCP3gSw0EoFVg";
 const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR5LeChHO-tpBOHSxObs86uTvDUqoiIwWJ0181ir7UYvEhv03uU1minFQxkzRZ0rN0K_VqjnKRXM_R9/pub?output=csv";
@@ -94,20 +104,14 @@ NIYAMO:
             }, 8000);
 
             const data = await res.json();
-            if (data.error) {
-                console.log(`⚠️ [${model}] Busy, trying next...`);
-                continue;
-            }
+            if (data.error) continue;
 
             const reply = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
             if (reply) {
-                console.log(`✅ Replied via ${model}`);
                 chatMemory[senderId].push(`Salesman: ${reply}`);
                 return reply;
             }
-        } catch (err) {
-            console.log(`⚠️ [${model}] Timeout...`);
-        }
+        } catch (err) {}
     }
 
     try {
@@ -127,7 +131,6 @@ NIYAMO:
             let reply = data.choices?.[0]?.message?.content?.trim();
             if (reply) {
                 reply = reply.replace(/^Salesman:\s*/i, "");
-                console.log("✅ Replied via Backup AI");
                 chatMemory[senderId].push(`Salesman: ${reply}`);
                 return reply;
             }
@@ -160,7 +163,6 @@ async function startAIBot() {
             console.log("🤖 BOT 100% READY & ACTIVE!");
         } else if (connection === "close") {
             const code = lastDisconnect?.error?.output?.statusCode;
-            console.log(`🔄 Connection refreshed (${code}), reconnecting...`);
             if (code !== DisconnectReason.loggedOut) {
                 setTimeout(startAIBot, 2000);
             }
@@ -182,17 +184,12 @@ async function startAIBot() {
                 const text = m?.conversation || m?.extendedTextMessage?.text || m?.imageMessage?.caption || "";
                 if (!text.trim()) continue;
 
-                console.log(`\n📩 Customer (${jid.split("@")[0]}): ${text}`);
                 await sock.sendPresenceUpdate("composing", jid).catch(() => {});
-
                 const reply = await askAI(jid, text);
                 if (reply) {
                     await sock.sendMessage(jid, { text: reply });
-                    console.log(`📤 Sent Reply!`);
                 }
-            } catch (err) {
-                console.log("⚠️ Msg Handler Error:", err.message);
-            }
+            } catch (err) {}
         }
     });
 }
