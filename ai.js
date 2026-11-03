@@ -12,7 +12,7 @@ http.createServer((req, res) => {
     console.log(`🌍 HTTP Server running on port ${PORT}`);
 });
 
-const GEMINI_KEY = "AQ.Ab8RN6IROf8L6GnhW7XlE94Ld-EbgYYgRKwidHCP3gSw0EoFVg";
+const GEMINI_KEY = "AQ.Ab8RN6LYJUEEgVU-i5svxaZixMW1tvrPqUxxxZREdfVD6RdpgQ";
 const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR5LeChHO-tpBOHSxObs86uTvDUqoiIwWJ0181ir7UYvEhv03uU1minFQxkzRZ0rN0K_VqjnKRXM_R9/pub?output=csv";
 
 let catalogText = "Loading catalog...";
@@ -84,10 +84,12 @@ NIYAMO:
 
     const fullPrompt = `${systemRules}\n\nChat History:\n${chatMemory[senderId].join("\n")}\nSalesman:`;
 
+    // Multiple Gemini Models list with automatic fallback
     const geminiModels = [
-        "gemini-flash-lite-latest",
         "gemini-flash-latest",
-        "gemini-3.8-flash"
+        "gemini-flash-lite-latest",
+        "gemini-2.5-flash",
+        "gemini-1.5-flash"
     ];
 
     for (const model of geminiModels) {
@@ -113,7 +115,7 @@ NIYAMO:
 
             const reply = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
             if (reply) {
-                console.log(`✅ AI Replied successfully!`);
+                console.log(`✅ AI Replied successfully using ${model}!`);
                 chatMemory[senderId].push(`Salesman: ${reply}`);
                 return reply;
             }
@@ -122,6 +124,7 @@ NIYAMO:
         }
     }
 
+    // Backup Free AI (Pollinations OpenAI)
     try {
         console.log(`🔄 Trying backup AI...`);
         const res = await fetchWithTimeout("https://text.pollinations.ai/openai", {
@@ -149,7 +152,7 @@ NIYAMO:
         console.log(`⚠️ Backup AI failed:`, e.message);
     }
 
-    return "Ane mara bhai, aatyare thodu technical issue che, tamare su jovu che store ma te kaho!";
+    return "Arey bhai, aatyare thodu network slow chhe, tame thodi var ma fari message karo!";
 }
 
 let sock = null;
