@@ -12,9 +12,8 @@ http.createServer((req, res) => {
     console.log(`🌍 HTTP Server running on port ${PORT}`);
 });
 
-// Render Environment Variable mathi key leshe (GitHub leak thi bachva mate)
-let GEMINI_KEY = process.env.GEMINI_KEY || "";
-let isGeminiKeyValid = Boolean(GEMINI_KEY);
+const GEMINI_KEY = (process.env.GEMINI_KEY || "").trim();
+console.log(`🔑 GEMINI_KEY Environment Status: ${GEMINI_KEY ? "Loaded Successfully ✅" : "Not Found (Using Free AI Models) ⚠️"}`);
 
 const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR5LeChHO-tpBOHSxObs86uTvDUqoiIwWJ0181ir7UYvEhv03uU1minFQxkzRZ0rN0K_VqjnKRXM_R9/pub?output=csv";
 
@@ -65,43 +64,50 @@ async function loadCatalog() {
 
 async function askAI(senderId, userMsg) {
     if (!chatMemory[senderId]) chatMemory[senderId] = [];
-    chatMemory[senderId].push(`Customer: ${userMsg}`);
-    if (chatMemory[senderId].length > 8) chatMemory[senderId].shift();
+    chatMemory[senderId].push({ role: "user", content: userMsg });
+    if (chatMemory[senderId].length > 10) chatMemory[senderId].shift();
 
-    const systemRules = `Tu "MANN'S STORE" no polite, friendly ane smart human salesman che.
-Customer sathe aadar sathe ("Sir" ke "Bhai" kahine) Gujarati, Hinglish, ke English ma natural manas ni jem vatchit kar.
+    const systemRules = `You are a very smart, friendly, and natural human assistant and salesman for "MANN'S STORE".
 
 SHOP DETAILS:
 - Shop Name: MANN'S STORE
-- Website: https://mannclothes.netlify.app
+- Website / Catalog Link: https://mannclothes.netlify.app
 - Sizes Available: M, L, XL
 
-LIVE STORE CATALOG:
+LIVE STORE INVENTORY / CATALOG:
 ${catalogText}
 
-NIYAMO:
-1. Customer dukan nu naam, kapda nu list, ke price puche to upar na catalog mathi sacho jawab aap.
-2. Photo mange to namrata thi website link aap: https://mannclothes.netlify.app
-3. Order karva mange to Name, Mobile Number, City ane Pincode mag.
-4. Jawab chhoto ane WhatsApp chat jevo rakho. Fakt Salesman no j jawab lakhvo.`;
+IMPORTANT SMART RULES:
+1. Language: Reply in the EXACT language or style the user speaks or requests (Gujarati, Hindi, Marathi, English, or Hinglish). If the user asks to talk in Marathi, talk fluently in Marathi!
+2. Smart Conversation: Directly and intelligently answer whatever the user asks. Never repeat the same greeting every time.
+3. Store Queries: When asked about clothes, prices, or products, give accurate details from the LIVE STORE INVENTORY above.
+4. Photos: When asked for photos/images, politely share: https://mannclothes.netlify.app
+5. Orders: When the user wants to buy/order, ask for their Name, Mobile Number, City, and Pincode.
+6. Keep replies concise, natural, and WhatsApp-friendly (2-4 lines unless listing products).`;
 
-    const fullPrompt = `${systemRules}\n\nChat History:\n${chatMemory[senderId].join("\n")}\nSalesman:`;
+    const historyText = chatMemory[senderId]
+        .map(m => `${m.role === "user" ? "Customer" : "Salesman"}: ${m.content}`)
+        .join("\n");
+    const fullPrompt = `${systemRules}\n\nConversation History:\n${historyText}\nSalesman:`;
 
-    // 1. Try Gemini Models (Only if valid key is present in Render Environment)
-    if (isGeminiKeyValid && GEMINI_KEY) {
+    // 1. Try Gemini Models if GEMINI_KEY is set in Render Environment
+    if (GEMINI_KEY) {
         const geminiModels = [
-            "gemini-2.5-flash",
             "gemini-flash-latest",
-            "gemini-1.5-flash"
+            "gemini-2.5-flash",
+            "gemini-flash-lite-latest"
         ];
 
         for (const model of geminiModels) {
             try {
                 console.log(`🔄 Trying Gemini model: ${model}`);
-                const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`;
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
                 const res = await fetchWithTimeout(url, {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    headers: {
+                        "Content-Type": "application/json",
+                        "X-goog-api-key": GEMINI_KEY
+                    },
                     body: JSON.stringify({
                         contents: [{ parts: [{ text: fullPrompt }] }]
                     })
@@ -109,40 +115,41 @@ NIYAMO:
 
                 const data = await res.json();
                 if (data.error) {
-                    console.log(`⚠️ Model ${model} error:`, data.error.message);
-                    if (data.error.message.includes("API key not valid")) {
-                        console.log("⚠️ Disabling invalid Gemini Key, switching permanently to Free AI Models...");
-                        isGeminiKeyValid = false;
-                        break;
-                    }
+                    console.log(`⚠️ Gemini ${model} error:`, data.error.message);
+                    if (data.error.message.includes("API key not valid")) break;
                     continue;
                 }
 
                 const reply = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
                 if (reply) {
                     console.log(`✅ Gemini Replied successfully using ${model}!`);
-                    chatMemory[senderId].push(`Salesman: ${reply}`);
+                    chatMemory[senderId].push({ role: "assistant", content: reply });
                     return reply;
                 }
             } catch (err) {
-                console.log(`⚠️ Model ${model} failed:`, err.message);
+                console.log(`⚠️ Gemini ${model} failed:`, err.message);
             }
         }
     }
 
-    // 2. Multi-Model Free AI (No API Key Required - OpenAI & Mistral with 25s timeout)
-    const freeModels = ["openai", "mistral"];
-    for (const freeModel of freeModels) {
+    // 2. Smart Multi-Model Free AI with Proper Role Memory & Rate-Limit Retry
+    const freeModels = ["openai", "openai-fast", "mistral"];
+    for (let i = 0; i < freeModels.length; i++) {
+        const freeModel = freeModels[i];
         try {
             console.log(`🔄 Trying Free AI Model (${freeModel})...`);
             const res = await fetchWithTimeout("https://text.pollinations.ai/openai", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                    "Content-Type": "application/json",
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+                },
                 body: JSON.stringify({
                     model: freeModel,
+                    seed: Math.floor(Math.random() * 1000000),
                     messages: [
                         { role: "system", content: systemRules },
-                        { role: "user", content: `Chat History:\n${chatMemory[senderId].join("\n")}\n\nCustomer na chhella message no natural human salesman tarike jawab aap:` }
+                        ...chatMemory[senderId]
                     ]
                 })
             }, 25000);
@@ -153,26 +160,35 @@ NIYAMO:
                 if (reply) {
                     reply = reply.replace(/^Salesman:\s*/i, "");
                     console.log(`✅ Free AI (${freeModel}) Replied successfully!`);
-                    chatMemory[senderId].push(`Salesman: ${reply}`);
+                    chatMemory[senderId].push({ role: "assistant", content: reply });
                     return reply;
                 }
+            } else {
+                console.log(`⚠️ Free AI (${freeModel}) HTTP Status: ${res.status} - waiting 3s before next model...`);
+                await delay(3000);
             }
         } catch (e) {
             console.log(`⚠️ Free AI (${freeModel}) failed:`, e.message);
+            await delay(2000);
         }
     }
 
-    // 3. Direct Fast GET Fallback
+    // 3. Direct Fast GET Fallback with Short Prompt & Seed
     try {
         console.log(`🔄 Trying Fast Direct AI Fallback...`);
-        const directUrl = `https://text.pollinations.ai/${encodeURIComponent(fullPrompt)}`;
-        const res = await fetchWithTimeout(directUrl, { method: "GET" }, 25000);
+        const shortPrompt = `You are MANN'S STORE salesman (Catalog: ${catalogText.replace(/\n/g, ", ")} | Web: https://mannclothes.netlify.app). Reply smartly in the user's language to: "${userMsg}"`;
+        const directUrl = `https://text.pollinations.ai/${encodeURIComponent(shortPrompt)}?model=openai&seed=${Date.now()}`;
+        const res = await fetchWithTimeout(directUrl, {
+            method: "GET",
+            headers: { "User-Agent": "Mozilla/5.0" }
+        }, 20000);
+
         if (res.ok) {
             let reply = (await res.text()).trim();
-            if (reply) {
+            if (reply && !reply.includes("<!DOCTYPE html>")) {
                 reply = reply.replace(/^Salesman:\s*/i, "");
                 console.log(`✅ Fast Direct AI Replied successfully!`);
-                chatMemory[senderId].push(`Salesman: ${reply}`);
+                chatMemory[senderId].push({ role: "assistant", content: reply });
                 return reply;
             }
         }
@@ -180,7 +196,7 @@ NIYAMO:
         console.log(`⚠️ Direct AI failed:`, e.message);
     }
 
-    return "Namaste Bhai! MANN'S STORE ma tamaru swagat che. Amaro live catalog jovu hoy to https://mannclothes.netlify.app par visit karo athva tamare kaya kapda jova che te janavo!";
+    return "Haa bhai, bolo! Tamare MANN'S STORE ma kaya kapda ke price jova che? Amaro live catalog ahiya pan joi shako cho: https://mannclothes.netlify.app";
 }
 
 let sock = null;
